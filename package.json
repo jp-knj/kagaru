@@ -1,0 +1,32 @@
+{
+  "name": "kagaru",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Small edits for human-written JavaScript configs",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "demo": "node example.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "acorn": "^8.19.0"
+  },
+  "packageManager": "pnpm@11.28.4",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jp-knj/kagaru.git"
+  }
+}
