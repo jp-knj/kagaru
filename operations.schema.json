@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kagaru edit operations",
+  "type": "array",
+  "items": { "$ref": "#/$defs/operation" },
+  "$defs": {
+    "jsonValue": {
+      "anyOf": [
+        { "type": ["null", "boolean", "number", "string"] },
+        { "type": "array", "items": { "$ref": "#/$defs/jsonValue" } },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      ]
+    },
+    "operation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["op", "path"],
+          "properties": {
+            "op": { "enum": ["set", "append"] },
+            "path": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "string" }
+            },
+            "value": { "$ref": "#/$defs/jsonValue" },
+            "expression": { "type": "string" }
+          },
+          "oneOf": [{ "required": ["value"] }, { "required": ["expression"] }],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["op", "from", "local"],
+          "properties": {
+            "op": { "const": "addImport" },
+            "from": { "type": "string" },
+            "local": {
+              "type": "string",
+              "minLength": 1,
+              "description": "A single JavaScript module binding identifier. Syntax is validated by Kagaru."
+            },
+            "imported": { "type": "string", "default": "default" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

@@ -1,17 +1,24 @@
-import { expression, editConfig } from 'kagaru';
+import { applyEdits } from 'kagaru';
 
-const config = editConfig(`import { defineConfig } from 'vite';
+const source = `import { defineConfig, type UserConfig } from 'vite';
 
 export default defineConfig({
   // Keep the port aligned with the local API proxy.
   server: { port: 3000 },
   plugins: [],
-});
-`);
+} satisfies UserConfig);
+`;
 
-config
-	.addImport({ from: '@vitejs/plugin-react', local: 'react' })
-	.append(['plugins'], expression('react()'))
-	.set(['server', 'port'], 3001);
+const operations = JSON.parse(`[
+  { "op": "addImport", "from": "@vitejs/plugin-react", "local": "react" },
+  { "op": "append", "path": ["plugins"], "expression": "react()" },
+  { "op": "set", "path": ["server", "port"], "value": 3001 }
+]`);
 
-console.info(config.code);
+const result = applyEdits(source, operations, { language: 'ts' });
+if (result.ok) {
+	console.info(result.code);
+} else {
+	console.error(result.error);
+	process.exitCode = 1;
+}
