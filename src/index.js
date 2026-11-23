@@ -1,5 +1,6 @@
 import { Parser } from 'acorn';
 import { tsPlugin } from '@sveltejs/acorn-typescript';
+import { checkPrecondition, verifyEdit } from './verification.js';
 
 const parserOptions = { ecmaVersion: 'latest', sourceType: 'module', preserveParens: true };
 const TypeScriptParser = Parser.extend(tsPlugin({ jsx: false }));
@@ -52,9 +53,25 @@ export function expression(code, options = {}) {
 
 function serialize(value) {
 	if (value instanceof Expression) return value.code;
+	if (isJsonValue(value)) return serializeJson(value);
 	const code = JSON.stringify(value);
 	if (code === undefined) throw new TypeError('Use expression() for non-JSON values.');
 	return code;
+}
+
+function propertyName(key) {
+	return key === '__proto__' ? '["__proto__"]' : JSON.stringify(key);
+}
+
+function serializeJson(value) {
+	if (Object.is(value, -0)) return '-0';
+	if (Array.isArray(value)) return `[${value.map(serializeJson).join(',')}]`;
+	if (value !== null && typeof value === 'object') {
+		return `{${Object.entries(value)
+			.map(([key, item]) => `${propertyName(key)}:${serializeJson(item)}`)
+			.join(',')}}`;
+	}
+	return JSON.stringify(value);
 }
 
 function unwrap(node) {
@@ -73,11 +90,16 @@ function property(object, key) {
 	}
 	if (
 		object.properties.some(
-			(prop) => prop.type !== 'Property' || prop.computed || prop.method || prop.kind !== 'init',
+			(prop) =>
+				prop.type !== 'Property' ||
+				prop.method ||
+				prop.kind !== 'init' ||
+				(prop.computed && (prop.key.type !== 'Literal' || typeof prop.key.value !== 'string')) ||
+				(!prop.computed && !prop.shorthand && (prop.key.name ?? prop.key.value) === '__proto__'),
 		)
 	) {
 		throw new Error(
-			'Spreads, computed keys, methods and accessors are not supported in edited objects.',
+			'Spreads, dynamic keys, prototype setters, methods and accessors are not supported in edited objects.',
 		);
 	}
 	const matches = object.properties.filter(
@@ -88,6 +110,10 @@ function property(object, key) {
 }
 
 export function editConfig(input, options = {}) {
+	return createEditor(input, options).editor;
+}
+
+function createEditor(input, options) {
 	let source = input;
 	let ast;
 	let comments;
@@ -159,8 +185,8 @@ export function editConfig(input, options = {}) {
 			const prop = property(object, path[i]);
 			if (!prop) {
 				let text = append ? `[${rendered}]` : rendered;
-				for (let j = path.length - 1; j > i; j--) text = `{${JSON.stringify(path[j])}: ${text}}`;
-				insert(object, `${JSON.stringify(path[i])}: ${text}`);
+				for (let j = path.length - 1; j > i; j--) text = `{${propertyName(path[j])}: ${text}}`;
+				insert(object, `${propertyName(path[i])}: ${text}`);
 				return;
 			}
 			if (i < path.length - 1) {
@@ -233,7 +259,7 @@ export function editConfig(input, options = {}) {
 			return editor;
 		},
 	};
-	return editor;
+	return { editor, snapshot: () => ({ source, ast, comments }) };
 }
 
 function importStatement({ from, local, imported = 'default' }) {
@@ -301,11 +327,27 @@ function validateOperation(operation) {
 	}
 	const keys =
 		operation.op === 'addImport'
-			? ['op', 'from', 'local', 'imported']
-			: ['op', 'path', 'value', 'expression'];
+			? ['op', 'from', 'local', 'imported', 'expect']
+			: ['op', 'path', 'value', 'expression', 'expect'];
 	if (Object.keys(operation).some((key) => !keys.includes(key))) {
 		throw new TypeError('Unexpected operation field.');
 	}
+	const expect = operation.expect;
+	if (!isRecord(expect)) throw new TypeError('Every operation requires an expect object.');
+	const fields = Object.keys(expect);
+	const missing = fields.length === 1 && expect.missing === true;
+	const valid =
+		operation.op === 'addImport'
+			? fields.length === 3 &&
+				typeof expect.from === 'string' &&
+				typeof expect.imported === 'string' &&
+				['type', 'value'].includes(expect.kind)
+			: fields.length === 1 &&
+				(Object.hasOwn(expect, 'value') || typeof expect.expression === 'string');
+	if (!missing && !valid)
+		throw new TypeError(
+			'Invalid precondition. Expect missing, a JSON value, an expression, or an import binding.',
+		);
 	if (operation.op === 'addImport') {
 		importStatement(operation);
 		return;
@@ -348,27 +390,54 @@ export function applyEdits(source, operations, options = {}) {
 			return failure('INVALID_INPUT', i, error);
 		}
 	}
-	let editor;
+	let state;
 	try {
-		editor = editConfig(source, options);
+		state = createEditor(source, options);
 	} catch (error) {
 		return failure('INVALID_SOURCE', null, error);
 	}
+	const { editor } = state;
 	for (let i = 0; i < operations.length; i++) {
 		const operation = operations[i];
 		let value = operation.value;
-		if (Object.hasOwn(operation, 'expression')) {
-			try {
+		let valueExpression;
+		let expectedExpression;
+		try {
+			if (Object.hasOwn(operation, 'expression')) {
 				value = expression(operation.expression, options);
-			} catch (error) {
-				return failure('INVALID_EXPRESSION', i, error);
+				valueExpression = parse(`(\n${operation.expression}\n)`, options).body[0].expression
+					.expression;
 			}
+			if (Object.hasOwn(operation.expect, 'expression')) {
+				expression(operation.expect.expression, options);
+				expectedExpression = parse(`(\n${operation.expect.expression}\n)`, options).body[0]
+					.expression.expression;
+			}
+		} catch (error) {
+			return failure('INVALID_EXPRESSION', i, error);
+		}
+		const before = state.snapshot();
+		try {
+			if (!checkPrecondition(before.ast, operation, expectedExpression)) {
+				return failure(
+					'PRECONDITION_FAILED',
+					i,
+					new Error('The declared precondition does not match the current target.'),
+				);
+			}
+		} catch (error) {
+			return failure('EDIT_FAILED', i, error);
 		}
 		try {
 			if (operation.op === 'addImport') editor.addImport(operation);
 			else editor[operation.op](operation.path, value);
 		} catch (error) {
 			return failure('EDIT_FAILED', i, error);
+		}
+		try {
+			verifyEdit(before, operation, state.snapshot(), valueExpression);
+		} catch (error) {
+			return failure('VERIFICATION_FAILED', i, error);
 		}
 	}
 	return { ok: true, code: editor.code, changed: editor.code !== source };

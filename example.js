@@ -10,9 +10,9 @@ export default defineConfig({
 `;
 
 const operations = JSON.parse(`[
-  { "op": "addImport", "from": "@vitejs/plugin-react", "local": "react" },
-  { "op": "append", "path": ["plugins"], "expression": "react()" },
-  { "op": "set", "path": ["server", "port"], "value": 3001 }
+  { "op": "addImport", "from": "@vitejs/plugin-react", "local": "react", "expect": { "missing": true } },
+  { "op": "append", "path": ["plugins"], "expect": { "value": [] }, "expression": "react()" },
+  { "op": "set", "path": ["server", "port"], "expect": { "value": 3000 }, "value": 3001 }
 ]`);
 
 const result = applyEdits(source, operations, { language: 'ts' });

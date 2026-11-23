@@ -16,19 +16,34 @@ export interface EditOptions {
 	language?: 'js' | 'ts';
 }
 
+export type ValueExpectation =
+	| { missing: true; value?: never; expression?: never }
+	| { value: JsonValue; missing?: never; expression?: never }
+	| { expression: string; missing?: never; value?: never };
+
+export type ImportExpectation =
+	| { missing: true; from?: never; imported?: never; kind?: never }
+	| { from: string; imported: string; kind: 'value' | 'type'; missing?: never };
+
 export type EditOperation =
-	| ({ op: 'set' | 'append'; path: readonly [string, ...string[]] } & (
+	| ({ op: 'set' | 'append'; path: readonly [string, ...string[]]; expect: ValueExpectation } & (
 			| { value: JsonValue; expression?: never }
 			| { expression: string; value?: never }
 	  ))
-	| { op: 'addImport'; from: string; local: string; imported?: string };
+	| { op: 'addImport'; from: string; local: string; imported?: string; expect: ImportExpectation };
 
 export type ApplyEditsResult =
 	| { ok: true; code: string; changed: boolean }
 	| {
 			ok: false;
 			error: {
-				code: 'INVALID_INPUT' | 'INVALID_SOURCE' | 'INVALID_EXPRESSION' | 'EDIT_FAILED';
+				code:
+					| 'INVALID_INPUT'
+					| 'INVALID_SOURCE'
+					| 'INVALID_EXPRESSION'
+					| 'EDIT_FAILED'
+					| 'PRECONDITION_FAILED'
+					| 'VERIFICATION_FAILED';
 				operationIndex: number | null;
 				message: string;
 			};
