@@ -145,6 +145,25 @@ test('rejects imports placed before file directives', () => {
 	}
 });
 
+test('requires imports to stay between multiple file directives and statement comments', () => {
+	const operation = { op: 'addImport', from: 'pkg', local: 'plugin' };
+	const added = 'import plugin from "pkg";\n';
+	const reference = '/// <reference path="./types.d.ts" />\n';
+	const check = '// @ts-check\n';
+	const documentation = '/** @type {number} */\n// Keep this setting\n';
+	const statement = 'const port = "wrong"; export default { port };';
+	const source = reference + check + documentation + statement;
+	assert.doesNotThrow(() =>
+		verify(source, operation, reference + check + added + documentation + statement),
+	);
+	for (const result of [
+		added + source,
+		reference + added + check + documentation + statement,
+		reference + check + documentation + added + statement,
+	])
+		assert.throws(() => verify(source, operation, result));
+});
+
 test('compares expressions without executing them and preserves template raw text', () => {
 	const source = 'export default { value: null };';
 	const operation = { op: 'set', path: ['value'], expression: 'plugin({ enabled: true })' };

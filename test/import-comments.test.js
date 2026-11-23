@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { applyEdits } from 'kagaru';
+import { applyEdits, editConfig } from 'kagaru';
 
 const operation = {
 	op: 'addImport',
@@ -42,11 +42,27 @@ test('preserves TypeScript diagnostics when adding an import near compiler comme
 	const directory = mkdtempSync(join(tmpdir(), 'kagaru-comment-diagnostics-'));
 	t.after(() => rmSync(directory, { recursive: true, force: true }));
 	writeFileSync(join(directory, 'dependency.js'), 'export default {};');
+	writeFileSync(join(directory, 'types.d.ts'), 'type Port = number;');
 	const cases = [
 		['js', '/** @type {number} */\nconst port = "wrong";', ['2322']],
 		['js', '/** @type {number} */\n// Keep this setting\nconst port = "wrong";', ['2322']],
 		['js', '// @ts-nocheck\n/** @type {number} */\nconst port = "wrong";', []],
 		['js', 'import old from "./dependency.js"; /** @type {number} */\nconst port = "wrong";', []],
+		['js', '// @ts-check\n/** @type {number} */\nconst port = "wrong";', ['2322'], false],
+		['js', '/** @type {number} */\n/** Port */\nconst port = "wrong";', []],
+		['js', '/** Port */\n/** @type {number} */\nconst port = "wrong";', ['2322']],
+		['js', '/** @param {number} value */\nfunction port(value) {}\nport("wrong");', ['2345']],
+		['ts', '/// <reference path="./types.d.ts" />\nconst port: Port = 3000;', []],
+		['ts', '// Example: @ts-expect-error\nconst port: number = "wrong";', ['2322']],
+		['ts', '/* @ts-expect-error\n */\nconst port: number = "wrong";', ['2322']],
+		['ts', '/* Explanation @ts-ignore */\nconst port: number = "wrong";', ['2322']],
+		['ts', '// @ts-expect-error: incompatible fixture\nconst port: number = "wrong";', []],
+		['ts', '"use client"; // @ts-expect-error\nconst port: number = "wrong";', []],
+		[
+			'ts',
+			'import old from "./dependency.js"; // @ts-expect-error\r\nconst port: number = "wrong";',
+			[],
+		],
 	];
 	for (const directive of [
 		'// @ts-ignore',
@@ -60,7 +76,7 @@ test('preserves TypeScript diagnostics when adding an import near compiler comme
 			cases.push(['ts', `${prefix}${directive}\nconst port: number = "wrong";`, []]);
 		}
 	}
-	for (const [index, [language, statement, expected]] of cases.entries()) {
+	for (const [index, [language, statement, expected, checkJs = true]] of cases.entries()) {
 		const source = `${statement}\nexport default { port };`;
 		const result = applyEdits(source, [operation], { language });
 		assert.equal(result.ok, true, source);
@@ -78,6 +94,7 @@ test('preserves TypeScript diagnostics when adding an import near compiler comme
 					'--noEmit',
 					'--allowJs',
 					'--checkJs',
+					String(checkJs),
 					'--module',
 					'nodenext',
 					'--target',
@@ -112,4 +129,76 @@ test('rejects import positions that separate overlapping file and statement comm
 		assert.equal(result.error.code, 'EDIT_FAILED');
 		assert.equal('code' in result, false);
 	}
+});
+
+test('preserves comments in files with no statements or final newline', () => {
+	for (const [source, expected] of [
+		['// @ts-nocheck', '// @ts-nocheck\nimport plugin from "./dependency.js";\n'],
+		['/** @type {number} */', 'import plugin from "./dependency.js";\n/** @type {number} */'],
+		['// @ts-expect-error', 'import plugin from "./dependency.js";\n// @ts-expect-error'],
+		[
+			'#!/usr/bin/env node\n// @ts-ignore',
+			'#!/usr/bin/env node\nimport plugin from "./dependency.js";\n// @ts-ignore',
+		],
+	]) {
+		for (const language of ['js', 'ts']) {
+			assert.deepEqual(applyEdits(source, [operation], { language }), {
+				ok: true,
+				code: expected,
+				changed: true,
+			});
+		}
+	}
+});
+
+test('keeps compiler comments attached through a batch of imports and config edits', () => {
+	const header = '#!/usr/bin/env node\n// @ts-check\n';
+	const documented = '/** @type {{ port: number }} */\nexport default { port: 3000 };';
+	const imports = [operation, { ...operation, local: 'second', imported: 'named' }];
+	const result = applyEdits(header + documented, [
+		...imports,
+		{ op: 'set', path: ['port'], expect: { value: 3000 }, value: 3001 },
+	]);
+	assert.deepEqual(result, {
+		ok: true,
+		code: `${header}import plugin from "./dependency.js";\nimport { "named" as second } from "./dependency.js";\n${documented.replace('3000', '3001')}`,
+		changed: true,
+	});
+	const repeated = applyEdits(result.code, imports);
+	assert.equal(repeated.ok, false);
+	assert.equal(repeated.error.code, 'PRECONDITION_FAILED');
+	assert.equal(repeated.error.operationIndex, 0);
+	assert.equal('code' in repeated, false);
+});
+
+test('returns no partial code when a later import cannot preserve compiler comments', () => {
+	const source = '/** @type {{ port: number }} */\n// @ts-nocheck\nexport default { port: 3000 };';
+	const result = applyEdits(source, [
+		{ op: 'set', path: ['port'], expect: { value: 3000 }, value: 3001 },
+		operation,
+	]);
+	assert.equal(result.ok, false);
+	assert.equal(result.error.code, 'EDIT_FAILED');
+	assert.equal(result.error.operationIndex, 1);
+	assert.deepEqual(Object.keys(result), ['ok', 'error']);
+});
+
+test('keeps fluent editor state intact when an import cannot preserve compiler comments', () => {
+	const source = '/** @type {{ port: number }} */\n// @ts-nocheck\nexport default { port: 3000 };';
+	const editor = editConfig(source).set(['port'], 3001);
+	assert.throws(() => editor.addImport({ from: operation.from, local: operation.local }));
+	assert.equal(editor.code, source.replace('3000', '3001'));
+});
+
+test('accepts an existing import without moving its compiler comments', () => {
+	const source = `/** Plugin */\n// @ts-nocheck\nimport plugin from "./dependency.js";\nexport default {};`;
+	assert.deepEqual(
+		applyEdits(source, [
+			{
+				...operation,
+				expect: { from: operation.from, imported: 'default', kind: 'value' },
+			},
+		]),
+		{ ok: true, code: source, changed: false },
+	);
 });
