@@ -47,8 +47,13 @@ test('creates missing paths inside TypeScript wrappers', () => {
 	const result = applyEdits(
 		'export default ({} as const) satisfies Config;',
 		[
-			{ op: 'set', path: ['server', 'port'], value: 3001 },
-			{ op: 'append', path: ['plugins'], expression: 'plugin<Options>()' },
+			{ op: 'set', expect: { missing: true }, path: ['server', 'port'], value: 3001 },
+			{
+				op: 'append',
+				expect: { missing: true },
+				path: ['plugins'],
+				expression: 'plugin<Options>()',
+			},
 		],
 		options,
 	);
@@ -79,7 +84,15 @@ test('deduplicates runtime default and named imports in TypeScript', () => {
 		const imported = source.includes('Options') ? 'plugin' : 'default';
 		const result = applyEdits(
 			source,
-			[{ op: 'addImport', from: 'pkg', local: 'plugin', imported }],
+			[
+				{
+					op: 'addImport',
+					expect: { from: 'pkg', imported, kind: 'value' },
+					from: 'pkg',
+					local: 'plugin',
+					imported,
+				},
+			],
 			options,
 		);
 		assert.deepEqual(result, { ok: true, code: source, changed: false });
@@ -122,11 +135,11 @@ test('rejects import collisions with TypeScript and runtime declarations', () =>
 	]) {
 		const result = applyEdits(
 			`${declaration} export default {};`,
-			[{ op: 'addImport', from: 'pkg', local: 'taken' }],
+			[{ op: 'addImport', expect: { missing: true }, from: 'pkg', local: 'taken' }],
 			options,
 		);
 		assert.equal(result.ok, false, declaration);
-		assert.equal(result.error.code, 'EDIT_FAILED', declaration);
+		assert.equal(result.error.code, 'PRECONDITION_FAILED', declaration);
 		assert.equal(result.error.operationIndex, 0);
 		assert.equal('code' in result, false);
 	}
