@@ -4,6 +4,7 @@ import { tsPlugin } from '@sveltejs/acorn-typescript';
 import { isNode } from './ast.js';
 import type { Module, Snapshot } from './ast.js';
 import { checkPrecondition, verifyEdit } from './verification.js';
+import { importCommentRange } from './comments.js';
 
 declare const expressionBrand: unique symbol;
 
@@ -363,6 +364,13 @@ function createEditor(input: string, options: EditOptions) {
 					}
 				}
 			}
+			const min = previous?.end ?? 0;
+			const max = ast.body.find((node) => node.start >= min)?.start ?? source.length;
+			const [headerEnd, statementStart] = importCommentRange({ source, ast, comments }, min, max);
+			if (headerEnd > statementStart) {
+				throw new Error('File and statement comments leave no safe import position.');
+			}
+			position = Math.max(headerEnd, Math.min(position, statementStart));
 			const newline = source.includes('\r\n') ? '\r\n' : '\n';
 			const prefix = position && source[position - 1] !== '\n' ? newline : '';
 			const suffix = source.slice(position, position + newline.length) === newline ? '' : newline;

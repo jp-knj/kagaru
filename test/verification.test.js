@@ -109,6 +109,42 @@ test('rejects incorrect import names, kinds, extra bindings and unrelated edits'
 	);
 });
 
+test('rejects imports that detach compiler comments from existing statements', () => {
+	const operation = { op: 'addImport', from: 'pkg', local: 'plugin' };
+	const added = 'import plugin from "pkg";\n';
+	for (const comment of [
+		'/** @type {number} */\n',
+		'/** @type {number} */\n// Keep this setting\n',
+		'// @ts-ignore\n',
+		'// @ts-expect-error\n',
+		'/* @ts-expect-error */\n',
+	]) {
+		const statement = 'const port = "wrong"; export default { port };';
+		assert.doesNotThrow(() => verify(comment + statement, operation, added + comment + statement));
+		assert.throws(() => verify(comment + statement, operation, comment + added + statement));
+	}
+	const previous = 'import old from "old"; ';
+	const rest = '// @ts-expect-error\nconst port: number = "wrong"; export default { port };';
+	assert.doesNotThrow(() => verify(previous + rest, operation, previous + '\n' + added + rest));
+	assert.throws(() =>
+		verify(previous + rest, operation, previous + rest.replace('\n', '\n' + added)),
+	);
+});
+
+test('rejects imports placed before file directives', () => {
+	const operation = { op: 'addImport', from: 'pkg', local: 'plugin' };
+	const added = 'import plugin from "pkg";\n';
+	for (const header of [
+		'// @ts-check\n',
+		'// @ts-nocheck\n',
+		'/// <reference path="./types.d.ts" />\n',
+	]) {
+		const statement = 'export default {};';
+		assert.doesNotThrow(() => verify(header + statement, operation, header + added + statement));
+		assert.throws(() => verify(header + statement, operation, added + header + statement));
+	}
+});
+
 test('compares expressions without executing them and preserves template raw text', () => {
 	const source = 'export default { value: null };';
 	const operation = { op: 'set', path: ['value'], expression: 'plugin({ enabled: true })' };
