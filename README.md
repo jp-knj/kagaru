@@ -33,6 +33,31 @@ build before running; `pnpm pack` builds through `prepack`. Consumers use the
 compiled JavaScript through the package exports and do not need a TypeScript
 runtime or build step. Generated files are not committed.
 
+## Mutation testing
+
+Use Node.js 22 or later for development tooling. Run `pnpm test:mutation` to
+build the package, verify the unmodified test suite, check the 28 contract
+mutations in `test/mutations.json`, and run Stryker across `src/**/*.ts`.
+`pnpm test:mutation:contract` runs only the contract checks.
+
+Contract mutations run in a temporary copy and must all be detected. A surviving
+mutation, stale replacement, syntax error, or failed test process fails the
+command; timeouts are not credited as detections. These checks protect specific
+edit guarantees. Stryker generates additional mutations and requires a mutation
+score of at least 80%. Its HTML and JSON reports include surviving mutants for
+review; the score does not establish semantic correctness.
+
+Reports are written under `reports/`. GitHub Actions runs both checks and strict
+type checking for pull requests and pushes to `main`, and uploads the reports
+even when a check fails.
+
+Stryker uses the [TAP runner](https://stryker-mutator.io/docs/stryker-js/tap-runner/)
+with the existing Node tests. Its `tsconfigFile` is empty to skip config rewriting,
+which depends on a compiler API removed in TypeScript 7. The build command uses
+the project's `tsconfig.json` directly; it has no external config references.
+Stryker disables type checking in instrumented copies, so strict type checks run
+separately on the unmodified implementation.
+
 ## Apply instructions from an AI
 
 Ask the AI for an array of operations matching `kagaru/operations.schema.json`:

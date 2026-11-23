@@ -21,7 +21,9 @@
     "test": "pnpm build && node --test test/*.test.js",
     "test:types": "pnpm build && tsc --ignoreConfig --noEmit --strict --exactOptionalPropertyTypes --module nodenext --target es2022 test/types.ts",
     "demo": "pnpm build && node example.js",
-    "prepack": "pnpm build"
+    "prepack": "pnpm build",
+    "test:mutation:contract": "pnpm build && node scripts/mutation-contract.mjs",
+    "test:mutation": "pnpm test:mutation:contract && stryker run"
   },
   "engines": {
     "node": ">=20"
@@ -36,6 +38,8 @@
     "url": "git+https://github.com/jp-knj/kagaru.git"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "10.1.1",
+    "@stryker-mutator/tap-runner": "10.1.1",
     "ajv": "^8.20.0",
     "typescript": "^7.0.2"
   }

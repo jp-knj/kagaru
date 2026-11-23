@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { applyEdits, editConfig } from 'kagaru';
@@ -82,6 +82,7 @@ test('preserves TypeScript diagnostics when adding an import near compiler comme
 			cases.push(['ts', `${prefix}${directive}\nconst port: number = "wrong";`, []]);
 		}
 	}
+	const fixtures = [];
 	for (const [index, [language, statement, expected, checkJs = true]] of cases.entries()) {
 		const source = `${statement}\nexport default { port };`;
 		const result = applyEdits(source, [operation], { language });
@@ -92,6 +93,14 @@ test('preserves TypeScript diagnostics when adding an import near compiler comme
 		]) {
 			const filename = join(directory, `${index}-${state}.${language}`);
 			writeFileSync(filename, code);
+			fixtures.push({ filename, state, checkJs, expected, code });
+		}
+	}
+	for (const state of ['before', 'after']) {
+		for (const checkJs of [true, false]) {
+			const group = fixtures.filter(
+				(fixture) => fixture.state === state && fixture.checkJs === checkJs,
+			);
 			const checked = spawnSync(
 				process.execPath,
 				[
@@ -105,18 +114,35 @@ test('preserves TypeScript diagnostics when adding an import near compiler comme
 					'nodenext',
 					'--target',
 					'es2022',
-					filename,
+					...group.map((fixture) => fixture.filename),
 				],
 				{ encoding: 'utf8' },
 			);
 			assert.ifError(checked.error);
 			assert.notEqual(checked.status, null, checked.stderr);
-			assert.equal(checked.status === 0, expected.length === 0, checked.stdout + checked.stderr);
-			assert.deepEqual(
-				[...checked.stdout.matchAll(/error TS(\d+):/g)].map((match) => match[1]),
-				expected,
-				code,
+			assert.equal(
+				checked.status === 0,
+				group.every((fixture) => !fixture.expected.length),
+				checked.stdout + checked.stderr,
 			);
+			const diagnostics = new Map(group.map((fixture) => [basename(fixture.filename), []]));
+			const messages = [...checked.stdout.matchAll(/^(.*)\(\d+,\d+\): error TS(\d+):/gm)];
+			assert.equal(
+				messages.length,
+				[...checked.stdout.matchAll(/error TS\d+:/g)].length,
+				checked.stdout,
+			);
+			for (const [, file, code] of messages) {
+				assert.ok(diagnostics.has(basename(file)), checked.stdout);
+				diagnostics.get(basename(file)).push(code);
+			}
+			for (const fixture of group) {
+				assert.deepEqual(
+					diagnostics.get(basename(fixture.filename)),
+					fixture.expected,
+					fixture.code,
+				);
+			}
 		}
 	}
 });
