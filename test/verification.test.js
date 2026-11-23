@@ -164,6 +164,48 @@ test('requires imports to stay between multiple file directives and statement co
 		assert.throws(() => verify(source, operation, result));
 });
 
+test('rejects imports that move AMD directives past the first statement', () => {
+	const operation = { op: 'addImport', from: 'pkg', local: 'plugin' };
+	const added = 'import plugin from "pkg";\n';
+	const statement = 'export default {};';
+	for (const header of [
+		'/// <amd-module name="config" />\n',
+		'/// <amd-dependency path="legacy" name="legacy" />\n',
+	]) {
+		assert.doesNotThrow(() => verify(header + statement, operation, header + added + statement));
+		assert.throws(() => verify(header + statement, operation, added + header + statement));
+	}
+});
+
+test('rejects extra statements inserted alongside the requested import', () => {
+	const operation = { op: 'addImport', from: 'pkg', local: 'plugin' };
+	const source = '// Header\nexport default {};';
+	const added = 'import plugin from "pkg";\n';
+	assert.doesNotThrow(() => verify(source, operation, source.replace('export', added + 'export')));
+	for (const extra of ['sideEffect();\n', 'const extra = true;\n', 'import "extra";\n']) {
+		assert.throws(() =>
+			verify(source, operation, source.replace('export', added + extra + 'export')),
+		);
+	}
+});
+
+test('requires an existing import to preserve the entire source', () => {
+	const source = '// Header\nimport plugin from "pkg";\nexport default { port: 3000 };';
+	const operation = {
+		op: 'addImport',
+		from: 'pkg',
+		local: 'plugin',
+		expect: { from: 'pkg', imported: 'default', kind: 'value' },
+	};
+	assert.doesNotThrow(() => verify(source, operation, source));
+	for (const changed of [
+		source.replace('3000', '3001'),
+		source.replace('Header', 'Changed header'),
+		'import "extra";\n' + source,
+	])
+		assert.throws(() => verify(source, operation, changed));
+});
+
 test('compares expressions without executing them and preserves template raw text', () => {
 	const source = 'export default { value: null };';
 	const operation = { op: 'set', path: ['value'], expression: 'plugin({ enabled: true })' };
