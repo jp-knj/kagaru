@@ -2,6 +2,7 @@ import type { Node, ObjectExpression, ArrayExpression, Property } from 'acorn';
 import { isNode, isObject } from './ast.js';
 import type { Module, Snapshot } from './ast.js';
 import type { EditOperation, JsonValue, ValueExpectation } from './index.js';
+import { importCommentRange } from './comments.js';
 
 function unwrap(node: Node | null | undefined): Node | undefined {
 	while (
@@ -302,8 +303,9 @@ export function verifyEdit(
 			before.ast.body
 				.filter((node) => isNode(node, 'ExpressionStatement') && node.directive)
 				.at(-1);
-		const min = previous?.end ?? 0;
-		const max = before.ast.body.find((node) => node.start >= min)?.start ?? before.source.length;
+		const start = previous?.end ?? 0;
+		const next = before.ast.body.find((node) => node.start >= start)?.start ?? before.source.length;
+		const [min, max] = importCommentRange(before, start, next);
 		requireMatch(
 			inserted(before, after.source, added.start, added.end, min, max),
 			'The import modified existing source text.',

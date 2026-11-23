@@ -99,6 +99,12 @@ An import is a duplicate only when its module, imported name and local name
 match an existing runtime import. A type-only import is never reused as a runtime
 import. A conflicting local name is an error; use a different local name instead.
 Imports are added as separate declarations, preserving existing import text.
+Leading JSDoc and TypeScript `@ts-ignore` / `@ts-expect-error` comments stay with
+the existing statement. The output verifier rejects imports inserted between
+these comments and their statement.
+File directives such as `@ts-nocheck` and triple-slash references stay before the
+first statement. If file and statement comments overlap so that no insertion
+position preserves both, the edit fails.
 
 ## Preconditions and verified success
 

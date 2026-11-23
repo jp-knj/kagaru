@@ -109,6 +109,61 @@ test('rejects incorrect import names, kinds, extra bindings and unrelated edits'
 	);
 });
 
+test('rejects imports that detach compiler comments from existing statements', () => {
+	const operation = { op: 'addImport', from: 'pkg', local: 'plugin' };
+	const added = 'import plugin from "pkg";\n';
+	for (const comment of [
+		'/** @type {number} */\n',
+		'/** @type {number} */\n// Keep this setting\n',
+		'// @ts-ignore\n',
+		'// @ts-expect-error\n',
+		'/* @ts-expect-error */\n',
+	]) {
+		const statement = 'const port = "wrong"; export default { port };';
+		assert.doesNotThrow(() => verify(comment + statement, operation, added + comment + statement));
+		assert.throws(() => verify(comment + statement, operation, comment + added + statement));
+	}
+	const previous = 'import old from "old"; ';
+	const rest = '// @ts-expect-error\nconst port: number = "wrong"; export default { port };';
+	assert.doesNotThrow(() => verify(previous + rest, operation, previous + '\n' + added + rest));
+	assert.throws(() =>
+		verify(previous + rest, operation, previous + rest.replace('\n', '\n' + added)),
+	);
+});
+
+test('rejects imports placed before file directives', () => {
+	const operation = { op: 'addImport', from: 'pkg', local: 'plugin' };
+	const added = 'import plugin from "pkg";\n';
+	for (const header of [
+		'// @ts-check\n',
+		'// @ts-nocheck\n',
+		'/// <reference path="./types.d.ts" />\n',
+	]) {
+		const statement = 'export default {};';
+		assert.doesNotThrow(() => verify(header + statement, operation, header + added + statement));
+		assert.throws(() => verify(header + statement, operation, added + header + statement));
+	}
+});
+
+test('requires imports to stay between multiple file directives and statement comments', () => {
+	const operation = { op: 'addImport', from: 'pkg', local: 'plugin' };
+	const added = 'import plugin from "pkg";\n';
+	const reference = '/// <reference path="./types.d.ts" />\n';
+	const check = '// @ts-check\n';
+	const documentation = '/** @type {number} */\n// Keep this setting\n';
+	const statement = 'const port = "wrong"; export default { port };';
+	const source = reference + check + documentation + statement;
+	assert.doesNotThrow(() =>
+		verify(source, operation, reference + check + added + documentation + statement),
+	);
+	for (const result of [
+		added + source,
+		reference + added + check + documentation + statement,
+		reference + check + documentation + added + statement,
+	])
+		assert.throws(() => verify(source, operation, result));
+});
+
 test('compares expressions without executing them and preserves template raw text', () => {
 	const source = 'export default { value: null };';
 	const operation = { op: 'set', path: ['value'], expression: 'plugin({ enabled: true })' };
