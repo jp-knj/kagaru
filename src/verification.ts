@@ -1,62 +1,80 @@
-function unwrap(node) {
+import type { Node, ObjectExpression, ArrayExpression, Property } from 'acorn';
+import { isNode, isObject } from './ast.js';
+import type { Module, Snapshot } from './ast.js';
+import type { EditOperation, JsonValue, ValueExpectation } from './index.js';
+
+function unwrap(node: Node | null | undefined): Node | undefined {
 	while (
-		['ParenthesizedExpression', 'TSAsExpression', 'TSSatisfiesExpression'].includes(node?.type)
+		isNode(node, 'ParenthesizedExpression') ||
+		isNode(node, 'TSAsExpression') ||
+		isNode(node, 'TSSatisfiesExpression')
 	) {
 		node = node.expression;
 	}
-	return node;
+	return node ?? undefined;
 }
 
-function keyOf(prop) {
+function keyOf(prop: Property): string {
 	if (
-		prop.type !== 'Property' ||
 		prop.method ||
 		prop.kind !== 'init' ||
 		(prop.computed && (prop.key.type !== 'Literal' || typeof prop.key.value !== 'string'))
 	) {
 		throw new Error('Expected literal data properties with static keys.');
 	}
-	const key = prop.key.type === 'Identifier' ? prop.key.name : String(prop.key.value);
+	const key = isNode(prop.key, 'Identifier')
+		? prop.key.name
+		: String(isNode(prop.key, 'Literal') ? prop.key.value : undefined);
 	if (key === '__proto__' && !prop.computed && !prop.shorthand) {
 		throw new Error('Prototype setters are not supported in inspected objects.');
 	}
 	return key;
 }
 
-function properties(node) {
-	if (node?.type !== 'ObjectExpression')
-		throw new Error('Expected an object literal along the edited path.');
-	const entries = node.properties.map((prop) => [keyOf(prop), prop]);
+function properties(node: ObjectExpression): Map<string, Property> {
+	const entries = node.properties.map((prop): [string, Property] => {
+		if (prop.type !== 'Property')
+			throw new Error('Expected literal data properties with static keys.');
+		return [keyOf(prop), prop];
+	});
 	const result = new Map(entries);
 	if (result.size !== entries.length)
 		throw new Error('Duplicate properties are not supported in inspected objects.');
 	return result;
 }
 
-function target(ast, path) {
+function target(
+	ast: Module,
+	path: readonly string[],
+): { object: ObjectExpression; prop: Property | undefined; index: number } {
 	let object = unwrap(
-		ast.body.find((node) => node.type === 'ExportDefaultDeclaration')?.declaration,
+		ast.body.find((node) => isNode(node, 'ExportDefaultDeclaration'))?.declaration,
 	);
-	if (object?.type === 'CallExpression') object = unwrap(object.arguments[0]);
-	for (let index = 0; index < path.length; index++) {
+	if (isNode(object, 'CallExpression')) object = unwrap(object.arguments[0]);
+	for (let index = 0; ; index++) {
+		if (!isNode(object, 'ObjectExpression'))
+			throw new Error('Expected an object literal along the edited path.');
 		const prop = properties(object).get(path[index]);
 		if (!prop || index === path.length - 1) return { object, prop, index };
 		object = unwrap(prop.value);
 	}
 }
 
-function jsonValue(node) {
+function jsonValue(node: Node | null | undefined): JsonValue {
 	node = unwrap(node);
 	if (
-		node?.type === 'Literal' &&
-		(node.value === null || ['string', 'boolean', 'number'].includes(typeof node.value))
+		isNode(node, 'Literal') &&
+		(node.value === null ||
+			typeof node.value === 'string' ||
+			typeof node.value === 'boolean' ||
+			typeof node.value === 'number')
 	) {
 		if (typeof node.value === 'number' && !Number.isFinite(node.value))
 			throw new Error('Non-finite literal.');
 		return node.value;
 	}
 	if (
-		node?.type === 'UnaryExpression' &&
+		isNode(node, 'UnaryExpression') &&
 		node.operator === '-' &&
 		node.argument.type === 'Literal' &&
 		typeof node.argument.value === 'number' &&
@@ -64,8 +82,8 @@ function jsonValue(node) {
 	) {
 		return -node.argument.value;
 	}
-	if (node?.type === 'ArrayExpression') return node.elements.map(jsonValue);
-	if (node?.type === 'ObjectExpression') {
+	if (isNode(node, 'ArrayExpression')) return node.elements.map(jsonValue);
+	if (isNode(node, 'ObjectExpression')) {
 		return Object.fromEntries(
 			[...properties(node)].map(([key, prop]) => [key, jsonValue(prop.value)]),
 		);
@@ -73,16 +91,9 @@ function jsonValue(node) {
 	throw new Error('The expression cannot be read as JSON without execution.');
 }
 
-function equal(a, b) {
+function equal(a: unknown, b: unknown): boolean {
 	if (Object.is(a, b)) return true;
-	if (
-		!a ||
-		!b ||
-		typeof a !== 'object' ||
-		typeof b !== 'object' ||
-		Array.isArray(a) !== Array.isArray(b)
-	)
-		return false;
+	if (!isObject(a) || !isObject(b) || Array.isArray(a) !== Array.isArray(b)) return false;
 	const keys = Object.keys(a);
 	return (
 		keys.length === Object.keys(b).length &&
@@ -90,11 +101,11 @@ function equal(a, b) {
 	);
 }
 
-function sameTree(a, b, omittedA, omittedB) {
-	while (a?.type === 'ParenthesizedExpression') a = a.expression;
-	while (b?.type === 'ParenthesizedExpression') b = b.expression;
+function sameTree(a: unknown, b: unknown, omittedA?: Node, omittedB?: Node): boolean {
+	while (isNode(a, 'ParenthesizedExpression')) a = a.expression;
+	while (isNode(b, 'ParenthesizedExpression')) b = b.expression;
 	if (Object.is(a, b)) return true;
-	if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+	if (!isObject(a) || !isObject(b)) return false;
 	if (Array.isArray(a) || Array.isArray(b)) {
 		if (!Array.isArray(a) || !Array.isArray(b)) return false;
 		const left = a.filter((item) => item !== omittedA);
@@ -104,7 +115,7 @@ function sameTree(a, b, omittedA, omittedB) {
 			left.every((item, index) => sameTree(item, right[index], omittedA, omittedB))
 		);
 	}
-	const keys = (node) =>
+	const keys = (node: Record<string, unknown>) =>
 		Object.keys(node).filter(
 			(key) =>
 				!['start', 'end', 'loc', 'range'].includes(key) &&
@@ -117,7 +128,11 @@ function sameTree(a, b, omittedA, omittedB) {
 	);
 }
 
-function matches(node, expected, expectedExpression) {
+function matches(
+	node: Node | null | undefined,
+	expected: ValueExpectation | Extract<EditOperation, { op: 'set' | 'append' }>,
+	expectedExpression?: Node,
+): boolean {
 	if (!node) return false;
 	if (Object.hasOwn(expected, 'expression')) return sameTree(node, expectedExpression);
 	try {
@@ -127,9 +142,9 @@ function matches(node, expected, expectedExpression) {
 	}
 }
 
-function imports(ast, local) {
+function imports(ast: Module, local: string) {
 	return ast.body
-		.filter((node) => node.type === 'ImportDeclaration')
+		.filter((node) => isNode(node, 'ImportDeclaration'))
 		.flatMap((declaration) =>
 			declaration.specifiers
 				.filter((spec) => spec.local.name === local)
@@ -141,35 +156,41 @@ function imports(ast, local) {
 							? 'default'
 							: spec.type === 'ImportNamespaceSpecifier'
 								? '*'
-								: (spec.imported.name ?? spec.imported.value),
-					kind: declaration.importKind === 'type' || spec.importKind === 'type' ? 'type' : 'value',
+								: isNode(spec.imported, 'Identifier')
+									? spec.imported.name
+									: spec.imported.value,
+					kind:
+						('importKind' in declaration && declaration.importKind === 'type') ||
+						('importKind' in spec && spec.importKind === 'type')
+							? 'type'
+							: 'value',
 				})),
 		);
 }
 
-function binds(pattern, name) {
+function binds(pattern: Node | null | undefined, name: string): boolean {
 	if (!pattern) return false;
-	if (pattern.type === 'Identifier') return pattern.name === name;
-	if (pattern.type === 'RestElement') return binds(pattern.argument, name);
-	if (pattern.type === 'AssignmentPattern') return binds(pattern.left, name);
-	if (pattern.type === 'ArrayPattern') return pattern.elements.some((item) => binds(item, name));
-	if (pattern.type === 'ObjectPattern')
+	if (isNode(pattern, 'Identifier')) return pattern.name === name;
+	if (isNode(pattern, 'RestElement')) return binds(pattern.argument, name);
+	if (isNode(pattern, 'AssignmentPattern')) return binds(pattern.left, name);
+	if (isNode(pattern, 'ArrayPattern')) return pattern.elements.some((item) => binds(item, name));
+	if (isNode(pattern, 'ObjectPattern'))
 		return pattern.properties.some((prop) =>
 			binds(prop.type === 'RestElement' ? prop.argument : prop.value, name),
 		);
 	return false;
 }
 
-function declares(node, name, top = true) {
-	if (!node || typeof node !== 'object') return false;
-	if (node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration')
+function declares(node: unknown, name: string, top = true): boolean {
+	if (!isObject(node)) return false;
+	if (isNode(node, 'ExportNamedDeclaration') || isNode(node, 'ExportDefaultDeclaration'))
 		return declares(node.declaration, name, top);
-	if (node.type === 'ImportDeclaration')
+	if (isNode(node, 'ImportDeclaration'))
 		return node.specifiers.some((spec) => spec.local.name === name);
-	if (node.type === 'VariableDeclaration')
+	if (isNode(node, 'VariableDeclaration'))
 		return (top || node.kind === 'var') && node.declarations.some((decl) => binds(decl.id, name));
-	if (top && node.id?.name === name) return true;
-	if (/Function|Class|^TS/.test(node.type)) return false;
+	if (top && isNode(node.id, 'Identifier') && node.id.name === name) return true;
+	if (typeof node.type === 'string' && /Function|Class|^TS/.test(node.type)) return false;
 	return Object.values(node).some((value) =>
 		Array.isArray(value)
 			? value.some((child) => declares(child, name, false))
@@ -177,13 +198,19 @@ function declares(node, name, top = true) {
 	);
 }
 
-export function checkPrecondition(ast, operation, expectedExpression) {
+export function checkPrecondition(
+	ast: Module,
+	operation: EditOperation,
+	expectedExpression?: Node,
+): boolean {
 	if (operation.op === 'addImport') {
 		if (operation.expect.missing) return !ast.body.some((node) => declares(node, operation.local));
 		const bindings = imports(ast, operation.local);
 		return (
 			bindings.length === 1 &&
-			['from', 'imported', 'kind'].every((key) => bindings[0][key] === operation.expect[key])
+			(['from', 'imported', 'kind'] as const).every(
+				(key) => bindings[0][key] === operation.expect[key],
+			)
 		);
 	}
 	const { prop } = target(ast, operation.path);
@@ -192,18 +219,25 @@ export function checkPrecondition(ast, operation, expectedExpression) {
 		: matches(prop?.value, operation.expect, expectedExpression);
 }
 
-function requireMatch(condition, message) {
+function requireMatch(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(message);
 }
 
-function unchanged(before, after, removedBefore, removedAfter) {
+function unchanged(before: Snapshot, after: Snapshot, removedBefore?: Node, removedAfter?: Node) {
 	requireMatch(
 		sameTree(before.ast, after.ast, removedBefore, removedAfter),
 		'The edit changed syntax outside its target.',
 	);
 }
 
-function inserted(before, after, start, end, min, max) {
+function inserted(
+	before: Snapshot,
+	after: string,
+	start: number,
+	end: number,
+	min: number,
+	max: number,
+): boolean {
 	const length = after.length - before.source.length;
 	if (length <= 0) return false;
 	let position = 0;
@@ -218,7 +252,12 @@ function inserted(before, after, start, end, min, max) {
 	);
 }
 
-function insertedItem(before, after, list, item) {
+function insertedItem(
+	before: Snapshot,
+	after: Snapshot,
+	list: ObjectExpression | ArrayExpression,
+	item: Node,
+) {
 	const items = list.type === 'ArrayExpression' ? list.elements : list.properties;
 	const min = items.at(-1)?.end ?? list.start + 1;
 	const max = list.end - 1;
@@ -236,7 +275,12 @@ function insertedItem(before, after, list, item) {
 	requireMatch(valid, 'The insertion modified existing source text.');
 }
 
-export function verifyEdit(before, operation, after, valueExpression) {
+export function verifyEdit(
+	before: Snapshot,
+	operation: EditOperation,
+	after: Snapshot,
+	valueExpression?: Node,
+): void {
 	if (operation.op === 'addImport') {
 		const binding = imports(after.ast, operation.local);
 		requireMatch(
@@ -255,7 +299,9 @@ export function verifyEdit(before, operation, after, valueExpression) {
 		unchanged(before, after, undefined, added);
 		const previous =
 			before.ast.body.filter((node) => node.type === 'ImportDeclaration').at(-1) ??
-			before.ast.body.filter((node) => node.directive).at(-1);
+			before.ast.body
+				.filter((node) => isNode(node, 'ExpressionStatement') && node.directive)
+				.at(-1);
 		const min = previous?.end ?? 0;
 		const max = before.ast.body.find((node) => node.start >= min)?.start ?? before.source.length;
 		requireMatch(
@@ -273,7 +319,7 @@ export function verifyEdit(before, operation, after, valueExpression) {
 	const value = newTarget.prop.value;
 	if (operation.op === 'append') {
 		const array = unwrap(value);
-		requireMatch(array?.type === 'ArrayExpression', 'The appended value is not in an array.');
+		requireMatch(isNode(array, 'ArrayExpression'), 'The appended value is not in an array.');
 		requireMatch(
 			matches(array.elements.at(-1), operation, valueExpression),
 			'The appended value differs from the instruction.',
@@ -281,11 +327,11 @@ export function verifyEdit(before, operation, after, valueExpression) {
 		if (oldTarget.prop) {
 			const oldArray = unwrap(oldTarget.prop.value);
 			requireMatch(
-				oldArray?.type === 'ArrayExpression' &&
+				isNode(oldArray, 'ArrayExpression') &&
 					array.elements.length === oldArray.elements.length + 1,
 				'The array length does not match one append.',
 			);
-			const added = array.elements.at(-1);
+			const added = array.elements.at(-1)!;
 			unchanged(before, after, undefined, added);
 			insertedItem(before, after, oldArray, added);
 			return;
@@ -308,15 +354,20 @@ export function verifyEdit(before, operation, after, valueExpression) {
 		);
 		return;
 	}
-	const added = target(after.ast, operation.path.slice(0, oldTarget.index + 1)).prop;
+	const added = target(after.ast, operation.path.slice(0, oldTarget.index + 1)).prop!;
 	let nested = added;
 	for (let index = oldTarget.index + 1; index < operation.path.length; index++) {
-		const entries = properties(unwrap(nested.value));
+		const object = unwrap(nested.value);
+		requireMatch(
+			isNode(object, 'ObjectExpression'),
+			'Expected an object literal along the edited path.',
+		);
+		const entries = properties(object);
 		requireMatch(
 			entries.size === 1 && entries.has(operation.path[index]),
 			'A new parent contains unexpected properties.',
 		);
-		nested = entries.get(operation.path[index]);
+		nested = entries.get(operation.path[index])!;
 	}
 	unchanged(before, after, undefined, added);
 	insertedItem(before, after, oldTarget.object, added);

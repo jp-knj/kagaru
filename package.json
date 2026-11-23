@@ -6,20 +6,22 @@
   "description": "JSON-directed edits for human-written JavaScript and TypeScript configs",
   "exports": {
     ".": {
-      "types": "./src/index.d.ts",
-      "default": "./src/index.js"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./operations.schema.json": "./operations.schema.json"
   },
   "files": [
-    "src",
+    "dist",
     "README.md",
     "operations.schema.json"
   ],
   "scripts": {
-    "test": "node --test test/*.test.js",
-    "test:types": "tsc --ignoreConfig --noEmit --strict --exactOptionalPropertyTypes --module nodenext --target es2022 test/types.ts",
-    "demo": "node example.js"
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm build && node --test test/*.test.js",
+    "test:types": "pnpm build && tsc --ignoreConfig --noEmit --strict --exactOptionalPropertyTypes --module nodenext --target es2022 test/types.ts",
+    "demo": "pnpm build && node example.js",
+    "prepack": "pnpm build"
   },
   "engines": {
     "node": ">=20"

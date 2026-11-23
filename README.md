@@ -10,7 +10,7 @@ executing the config or loading its imports.
 
 The name comes from the Japanese verb _kagaru_ (かがる), to stitch: an edit joins
 new code to the surrounding text. Source ranges drive each change, with no
-whole-file printer or build step.
+whole-file printer.
 
 This is an unpublished prototype. The package remains private. Instructions
 without `expect` are rejected; callers must supply the state they inspected.
@@ -25,6 +25,13 @@ pnpm test
 pnpm test:types
 pnpm demo
 ```
+
+The implementation is TypeScript. `pnpm build` checks `src/` with strict typing
+and emits JavaScript and declarations into `dist/`. Public declarations are
+generated from the implementation, not maintained separately. Tests and examples
+build before running; `pnpm pack` builds through `prepack`. Consumers use the
+compiled JavaScript through the package exports and do not need a TypeScript
+runtime or build step. Generated files are not committed.
 
 ## Apply instructions from an AI
 
@@ -244,6 +251,6 @@ Development-only schema and declaration checks use Ajv and TypeScript.
 The packed package is checked in a fresh consumer project with production
 dependencies only. Size is measured as the sum of logical package-file bytes,
 excluding filesystem blocks, package-manager metadata and the shared store.
-The measured total is approximately **0.83 MB across three packages**, below the
+The measured total is approximately **0.84 MB across three packages**, below the
 1 MB target: Kagaru 0.0.0, Acorn 8.19.0 and `@sveltejs/acorn-typescript` 1.0.13.
 This is an installed-size measurement, not a download-size or speed benchmark.

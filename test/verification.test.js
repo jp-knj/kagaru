@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { Parser } from 'acorn';
 import { tsPlugin } from '@sveltejs/acorn-typescript';
 import { applyEdits } from 'kagaru';
-import { verifyEdit } from '../src/verification.js';
+import { verifyEdit } from '../dist/verification.js';
 
 const parser = Parser.extend(tsPlugin({ jsx: false }));
 function snapshot(source) {
