@@ -3,30 +3,38 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Small edits for human-written JavaScript configs",
+  "description": "JSON-directed edits for human-written JavaScript and TypeScript configs",
   "exports": {
     ".": {
       "types": "./src/index.d.ts",
       "default": "./src/index.js"
-    }
+    },
+    "./operations.schema.json": "./operations.schema.json"
   },
   "files": [
     "src",
-    "README.md"
+    "README.md",
+    "operations.schema.json"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
+    "test:types": "tsc --ignoreConfig --noEmit --strict --exactOptionalPropertyTypes --module nodenext --target es2022 test/types.ts",
     "demo": "node example.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@sveltejs/acorn-typescript": "^1.0.13",
     "acorn": "^8.19.0"
   },
   "packageManager": "pnpm@11.28.4",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jp-knj/kagaru.git"
+  },
+  "devDependencies": {
+    "ajv": "^8.20.0",
+    "typescript": "^7.0.2"
   }
 }

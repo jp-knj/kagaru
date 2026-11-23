@@ -1,34 +1,17 @@
 # Kagaru
 
-**Small edits for human-written configs.**
+**JSON instructions for small edits to JavaScript and TypeScript configs.**
 
-Kagaru edits JavaScript configuration files while retaining the source text
-outside each requested change. The name comes from the Japanese verb _kagaru_
-(かがる), to stitch: an edit joins new code to the surrounding text.
+An AI generates edit instructions; your application supplies the original source
+to Kagaru. Kagaru applies those instructions while retaining comments, formatting
+and types outside the edited ranges. It validates syntax without executing the
+config or loading its imports.
 
-It is built for CLI installers, project generators and upgrade tools that need
-to add an import, enable a plugin or change a nested setting. Those tools should
-produce small, reviewable diffs, even when the config contains handwritten
-comments and formatting.
+The name comes from the Japanese verb _kagaru_ (かがる), to stitch: an edit joins
+new code to the surrounding text. Source ranges drive each change, with no
+whole-file printer or build step.
 
-## Design principles
-
-- **Preserve the author's text.** Replace the requested value or insert a new
-  entry; keep unrelated source byte for byte. Comments inside a replaced value
-  are replaced with that value.
-- **Make each edit explicit.** Use property paths with `set()` and `append()`.
-  Validate syntax without executing the config. Reject unsupported targets
-  without changing the source for that operation.
-- **Keep installation small.** Acorn is the only dependency. Source ranges drive
-  edits directly, with no whole-file printer, runtime code generation or build
-  step.
-
-The initial scope is JavaScript ESM configuration with a default exported object,
-optionally wrapped in a call such as `defineConfig({ ... })`. TypeScript input and
-variable resolution are outside this prototype's scope.
-
-This is an unpublished prototype. The package is marked private to prevent
-accidental npm publication.
+This is an unpublished prototype. The package remains private.
 
 ## Try it
 
@@ -37,97 +20,171 @@ git clone https://github.com/jp-knj/kagaru.git
 cd kagaru
 pnpm install --frozen-lockfile
 pnpm test
+pnpm test:types
 pnpm demo
 ```
 
-There is no build step. The published entry point would be the same JavaScript
-that the tests exercise. TypeScript declarations are included for callers.
+## Apply instructions from an AI
+
+Ask the AI for an array of operations matching `kagaru/operations.schema.json`:
+
+```json
+[
+  { "op": "addImport", "from": "@vitejs/plugin-react", "local": "react" },
+  { "op": "append", "path": ["plugins"], "expression": "react()" },
+  { "op": "set", "path": ["server", "port"], "value": 3001 }
+]
+```
+
+Pass the parsed array and the original source to `applyEdits()`:
 
 ```js
-import { editConfig, expression } from 'kagaru';
+import { applyEdits } from 'kagaru';
 
-const config = editConfig(`import { defineConfig } from 'vite';
+const source = `import { defineConfig, type UserConfig } from 'vite';
 
 export default defineConfig({
   // Keep the port aligned with the local API proxy.
   server: { port: 3000 },
   plugins: [],
-});
-`);
+} satisfies UserConfig);
+`;
 
+const result = applyEdits(source, [
+  { op: 'addImport', from: '@vitejs/plugin-react', local: 'react' },
+  { op: 'append', path: ['plugins'], expression: 'react()' },
+  { op: 'set', path: ['server', 'port'], value: 3001 },
+], { language: 'ts' });
+
+if (result.ok) {
+  console.info(result.code);
+} else {
+  console.error(result.error);
+}
+```
+
+The example edits Vite config text without requiring Vite or React. Callers own
+file reading, JSON parsing and file writing, so they can review the returned
+string before saving it. Kagaru has no CLI, MCP server or LLM SDK dependency.
+
+## Operations
+
+| Operation | Fields | Behavior |
+| --- | --- | --- |
+| `set` | `path`, either `value` or `expression` | Replace or create a property. Create missing parent objects. |
+| `append` | `path`, either `value` or `expression` | Append one item to an array literal. Create missing objects and arrays. |
+| `addImport` | `from`, `local`, optional `imported` | Add a default or named runtime import. `imported` defaults to `"default"`. |
+
+Paths are non-empty arrays of property names. `['a.b']` addresses one property;
+`['a', 'b']` addresses a nested property. Empty property names are allowed. Array
+indices are not supported.
+
+Use `value` for JSON data, including nested objects and arrays. Use `expression`
+for one expression, such as `react()`, an identifier or a regular expression.
+The expression uses the selected language. Supplying both fields or neither is
+an error. Unknown operations, extra fields, invalid paths and non-JSON values
+are rejected. Non-JSON values include `undefined`, non-finite numbers, bigint,
+functions, cycles, sparse arrays and objects with accessors or custom prototypes.
+
+An import is a duplicate only when its module, imported name and local name
+match an existing runtime import. A type-only import is never reused as a runtime
+import. A conflicting local name is an error; use a different local name instead.
+Imports are added as separate declarations, preserving existing import text.
+
+## Results and errors
+
+`applyEdits(source, operations, options?)` is synchronous. It validates all
+instruction shapes, parses the source, then applies operations in order.
+
+```ts
+type ApplyEditsResult =
+  | { ok: true; code: string; changed: boolean }
+  | {
+      ok: false;
+      error: {
+        code: 'INVALID_INPUT' | 'INVALID_SOURCE' | 'INVALID_EXPRESSION' | 'EDIT_FAILED';
+        operationIndex: number | null;
+        message: string;
+      };
+    };
+```
+
+`changed` compares the final code with the original source. Empty operation arrays
+and exact duplicate imports can return `changed: false`. Failure results contain
+no code, including when earlier operations succeeded.
+
+| Error code | Meaning | `operationIndex` |
+| --- | --- | --- |
+| `INVALID_INPUT` | Invalid arguments, options or instruction shape | Zero-based operation index, or `null` for whole-input errors |
+| `INVALID_SOURCE` | Source cannot be parsed in the selected language | `null` |
+| `INVALID_EXPRESSION` | Expression text cannot be parsed as one expression | Zero-based operation index |
+| `EDIT_FAILED` | Unsupported target, import collision or invalid resulting module | Zero-based operation index |
+
+The package exports `EditOptions`, `EditOperation`, `ApplyEditsResult`, `JsonValue`,
+`Expression` and `ConfigEditor` types. The JSON Schema uses draft 2020-12 and
+describes the operation array. Syntax checks for expressions and local import
+identifiers are performed by Kagaru, beyond the schema's shape validation.
+Runtime input validation has no additional dependency.
+
+## Language and editing scope
+
+All entry points accept `{ language: 'js' | 'ts' }`; the default is `'js'`.
+TypeScript mode supports type annotations, type-only imports, `as const`,
+`satisfies` and calls with type arguments. It checks syntax, without type checking
+or executing source or expression code.
+
+The editable default export must be an object literal, or a call whose first
+argument is an object literal, such as `defineConfig<Config>({ ... })`. Parentheses,
+`as` and `satisfies` wrappers around these targets are supported. Nested objects
+and arrays can also have these wrappers.
+
+Text outside the edited ranges is retained verbatim. New entries use existing
+list indentation and LF or CRLF where possible. Generated strings and property
+names use double quotes. Replacing a value also replaces comments and type
+assertions inside that value. Appending to an asserted array retains its assertion.
+
+- No variable resolution, computed property evaluation or function-body editing.
+- Objects along the edited path cannot contain spreads, computed keys, methods or
+  accessors. Duplicate target keys are rejected.
+- Arrays can be appended to, but sparse arrays and arrays with spreads are rejected.
+- Imports support default and named bindings. Adding namespace imports and merging
+  declarations are not implemented.
+- CommonJS editing, JSX and TSX are outside the supported scope.
+- No source maps, full formatting inference or magicast API compatibility.
+- Every edit reparses the module. Kagaru is intended for small configuration files.
+
+## Fluent editor
+
+The original API is available for application-authored edits. Its methods throw
+on errors and commit each successful operation separately. A failed operation
+leaves earlier successful edits in place.
+
+```js
+import { editConfig, expression } from 'kagaru';
+
+const options = { language: 'ts' };
+const config = editConfig('export default {} satisfies Config;', options);
 config
   .addImport({ from: '@vitejs/plugin-react', local: 'react' })
-  .append(['plugins'], expression('react()'))
+  .append(['plugins'], expression('react()', options))
   .set(['server', 'port'], 3001);
 
 console.info(config.code);
 ```
 
-The example edits Vite config text; running it does not require Vite or React.
-Callers own file reading and writing, so they can preview the returned string
-before saving it.
+`expression(code, options?)` validates one expression for insertion. Pass the
+result directly to `.set()` or `.append()`; do not nest it inside JSON data.
+Fluent values retain the original `JSON.stringify()` behavior. `applyEdits()`
+uses the stricter JSON validation described above.
 
-## API
+## Installed size
 
-| API                                      | Behavior                                                                                                                                          |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `editConfig(source)`                     | Create a config editor from JavaScript ES module source without executing it.                                                                     |
-| `.set(path, value)`                      | Replace or create a property in the default exported object. Missing parent objects are created.                                                  |
-| `.append(path, value)`                   | Append to an array literal, creating missing objects and arrays.                                                                                  |
-| `.addImport({ from, local, imported? })` | Add a separate import declaration. `imported` defaults to `'default'`; a named export can also be specified. Exact duplicate imports are ignored. |
-| `.code`                                  | Return the current source string.                                                                                                                 |
-| `expression(source)`                     | Validate a single JavaScript expression for insertion without executing it.                                                                       |
+Kagaru's runtime dependencies are Acorn and `@sveltejs/acorn-typescript`.
+Development-only schema and declaration checks use Ajv and TypeScript.
 
-Paths are arrays of property names, so `['a.b']` addresses one property and
-`['a', 'b']` addresses a nested property. Values use `JSON.stringify()` semantics.
-For JavaScript calls, identifiers, regular expressions or other non-JSON values,
-wrap the entire value in `expression()`. Do not nest expressions inside JSON data.
-
-The editable default export must be an object literal, or a call whose first
-argument is an object literal, such as `defineConfig({ ... })`. Parentheses around
-these objects are supported. Input code is never imported or evaluated.
-
-## How it stays small
-
-Acorn supplies syntax validation and source ranges. Edits splice only the affected
-ranges of the original string, then reparse the result before committing it. A
-failed operation leaves the source unchanged. There is no AST printer, proxy
-layer, formatter, filesystem wrapper or build tool in the package.
-
-Text outside the edited ranges is retained verbatim, including comments. New
-entries use simple formatting, matching existing list indentation and LF or CRLF
-where possible. Generated strings and property names use double quotes. Editing
-an existing value replaces the comments inside that value along with the value.
-
-## Deliberate limits
-
-- JavaScript ESM only. TypeScript and JSX input are rejected.
-- No variable resolution, computed property evaluation or function-body editing.
-- Objects along the edited path cannot contain spreads, computed keys, methods or
-  accessors. Duplicate target keys are rejected.
-- Arrays can be appended to, but individual indices cannot be edited. Sparse
-  arrays cannot be appended to.
-- Imports support default and named bindings. Namespace imports and merging
-  declarations are not implemented.
-- No source maps, CommonJS editing, full formatting inference or magicast API
-  compatibility.
-- Every edit reparses the module. This is intended for small configuration files,
-  not bulk transformation of large source files.
-
-These limits reduce the implementation and dependency footprint. A size comparison
-with magicast must account for the smaller feature set.
-
-## Initial size comparison
-
-Two fresh consumer projects were installed from a local pnpm store on macOS
-ARM64. The prototype was installed from its packed tarball. The numbers sum the
-logical sizes of package files, including dependencies, rather than filesystem
-blocks, pnpm's shared store, or download sizes.
-
-| Package                        | Installed packages, including itself | Installed files |
-| ------------------------------ | -----------------------------------: | --------------: |
-| magicast 0.5.5                 |                                    6 |         5.44 MB |
-| kagaru 0.0.0 with Acorn 8.19.0 |                                    2 |         0.58 MB |
-
-That is approximately 89% fewer bytes for this deliberately smaller API. It is
-not a claim of feature equivalence or an install-time benchmark.
+The packed package is checked in a fresh consumer project with production
+dependencies only. Size is measured as the sum of logical package-file bytes,
+excluding filesystem blocks, package-manager metadata and the shared store.
+The measured total is approximately **0.81 MB across three packages**, below the
+1 MB target: Kagaru 0.0.0, Acorn 8.19.0 and `@sveltejs/acorn-typescript` 1.0.13.
+This is an installed-size measurement, not a download-size or speed benchmark.
