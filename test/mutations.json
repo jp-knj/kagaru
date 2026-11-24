@@ -1,0 +1,170 @@
+[
+  {
+    "id": "ignore-jsdoc",
+    "file": "dist/comments.js",
+    "before": "if (comment === documentation)\n            return true;",
+    "after": "if (comment === documentation)\n            return false;"
+  },
+  {
+    "id": "first-jsdoc-wins",
+    "file": "dist/comments.js",
+    "before": "const documentation = leading.findLast(",
+    "after": "const documentation = leading.find("
+  },
+  {
+    "id": "attach-inline-jsdoc",
+    "file": "dist/comments.js",
+    "before": "(min === 0 || /[\\r\\n\\u2028\\u2029]/.test(source.slice(min, comment.start)))",
+    "after": "true"
+  },
+  {
+    "id": "ignore-suppression-directives",
+    "file": "dist/comments.js",
+    "before": ".test(lastLine)",
+    "after": ".test('')"
+  },
+  {
+    "id": "ignore-line-ts-ignore",
+    "file": "dist/comments.js",
+    "before": "? /^\\/\\/\\/?\\s*@(ts-expect-error|ts-ignore)/",
+    "after": "? /^\\/\\/\\/?\\s*@(ts-expect-error)/"
+  },
+  {
+    "id": "scan-first-block-line",
+    "file": "dist/comments.js",
+    "before": ".at(-1)",
+    "after": ".at(0)"
+  },
+  {
+    "id": "skip-directive-trim",
+    "file": "dist/comments.js",
+    "before": ".trimStart()",
+    "after": ".trimEnd()"
+  },
+  {
+    "id": "ignore-file-comment-bound",
+    "file": "dist/comments.js",
+    "before": "return [headerEnd, statementStart];",
+    "after": "return [min, statementStart];"
+  },
+  {
+    "id": "ignore-statement-comment-bound",
+    "file": "dist/comments.js",
+    "before": "return [headerEnd, statementStart];",
+    "after": "return [headerEnd, max];"
+  },
+  {
+    "id": "first-file-directive-wins",
+    "file": "dist/comments.js",
+    "before": "? (leading.findLast((comment) => comment.type === 'Line'",
+    "after": "? (leading.find((comment) => comment.type === 'Line'"
+  },
+  {
+    "id": "ignore-reference-directives",
+    "file": "dist/comments.js",
+    "before": "(reference|amd-module|amd-dependency)",
+    "after": "(amd-module|amd-dependency)"
+  },
+  {
+    "id": "ignore-amd-module-directives",
+    "file": "dist/comments.js",
+    "before": "(reference|amd-module|amd-dependency)",
+    "after": "(reference|amd-dependency)"
+  },
+  {
+    "id": "ignore-amd-dependency-directives",
+    "file": "dist/comments.js",
+    "before": "(reference|amd-module|amd-dependency)",
+    "after": "(reference|amd-module)"
+  },
+  {
+    "id": "exclude-comment-at-gap-start",
+    "file": "dist/comments.js",
+    "before": "comment.start >= min",
+    "after": "comment.start > min"
+  },
+  {
+    "id": "exclude-comment-at-gap-end",
+    "file": "dist/comments.js",
+    "before": "comment.end <= max",
+    "after": "comment.end < max"
+  },
+  {
+    "id": "include-comments-after-gap",
+    "file": "dist/comments.js",
+    "before": "comment.end <= max",
+    "after": "true"
+  },
+  {
+    "id": "include-comments-before-gap",
+    "file": "dist/comments.js",
+    "before": "comment.start >= min",
+    "after": "true"
+  },
+  {
+    "id": "skip-writer-overlap-check",
+    "file": "dist/index.js",
+    "before": "if (headerEnd > statementStart)",
+    "after": "if (false)"
+  },
+  {
+    "id": "skip-writer-comment-placement",
+    "file": "dist/index.js",
+    "before": "position = Math.max(headerEnd, Math.min(position, statementStart));",
+    "after": "position = position;"
+  },
+  {
+    "id": "skip-verifier-comment-bounds",
+    "file": "dist/verification.js",
+    "before": "const [min, max] = importCommentRange(before, start, next);",
+    "after": "const [min, max] = [start, next];"
+  },
+  {
+    "id": "skip-insertion-lower-bound",
+    "file": "dist/verification.js",
+    "before": "return (position >= min &&",
+    "after": "return (true &&"
+  },
+  {
+    "id": "skip-insertion-upper-bound",
+    "file": "dist/verification.js",
+    "before": "position < Math.min(start, max)",
+    "after": "position < start"
+  },
+  {
+    "id": "skip-insertion-text-equality",
+    "file": "dist/verification.js",
+    "before": "before.source.slice(position) === after.slice(position + length)",
+    "after": "true"
+  },
+  {
+    "id": "skip-import-surrounding-ast",
+    "file": "dist/verification.js",
+    "before": "unchanged(before, after, undefined, added);\n        const previous",
+    "after": "const previous"
+  },
+  {
+    "id": "skip-existing-import-text-equality",
+    "file": "dist/verification.js",
+    "before": "requireMatch(before.source === after.source, 'An existing import must not modify source.');",
+    "after": "requireMatch(true, 'An existing import must not modify source.');"
+  },
+  {
+    "id": "skip-import-module-check",
+    "file": "dist/verification.js",
+    "before": "binding[0].from === operation.from",
+    "after": "true"
+  },
+  {
+    "id": "skip-import-kind-check",
+    "file": "dist/verification.js",
+    "before": "binding[0].kind === 'value'",
+    "after": "true"
+  },
+  {
+    "id": "allow-extra-import-bindings",
+    "file": "dist/verification.js",
+    "before": "added.specifiers.length === 1",
+    "after": "added.specifiers.length >= 1"
+  }
+]
