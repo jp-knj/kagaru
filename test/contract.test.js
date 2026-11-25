@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { applyEdits } from 'kagaru';
+import { applyEdits as applyEditsWithOptions } from 'kagaru';
+
+const applyEdits = (source, operations, options) =>
+	applyEditsWithOptions(source, operations, { wrapper: null, ...options });
 
 const source = 'export default { server: { port: 3000 }, plugins: [] };';
 
@@ -182,4 +185,69 @@ test('does not execute expected expressions and does not claim application valid
 		]),
 		'INVALID_EXPRESSION',
 	);
+});
+
+test('refuses ambiguous default exports and config calls', () => {
+	const edit = { op: 'set', path: ['a'], expect: { value: 1 }, value: 3 };
+	for (const input of [
+		'export default { a: 1 }; export default { a: 2 };',
+		'export default mergeConfig({ a: 1 }, { a: 2 });',
+		'export default (function (x) { return {}; })({ a: 1 });',
+		'export default lib.defineConfig({ a: 1 });',
+		'export default defineConfig?.({ a: 1 });',
+	])
+		fails(applyEdits(input, [edit], { language: 'ts' }), 'EDIT_FAILED');
+});
+
+test('keeps a JSDoc comment attached to the first statement when adding an import', () => {
+	const edit = { op: 'addImport', from: 'pkg', local: 'plugin', expect: { missing: true } };
+	const documented = '/** @type {import("x").Config} */\nexport default {};';
+	for (const language of ['js', 'ts']) {
+		for (const header of ['', '#!/usr/bin/env node\n', '// @ts-check\n', '/** License */\n']) {
+			const result = applyEdits(header + documented, [edit], { language });
+			assert.equal(result.code, `${header}import plugin from "pkg";\n${documented}`);
+		}
+	}
+});
+
+test('requires the declared config wrapper to match the source', () => {
+	const edit = { op: 'set', path: ['a'], expect: { value: 1 }, value: 2 };
+	for (const language of ['js', 'ts']) {
+		for (const [target, wrapper] of [
+			['{ a: 1 }', null],
+			['({ a: 1 })', null],
+			['defineConfig({ a: 1 })', 'defineConfig'],
+			['(defineConfig(({ a: 1 })))', 'defineConfig'],
+		]) {
+			const input = `export default ${target};`;
+			assert.deepEqual(applyEdits(input, [edit], { language, wrapper }), {
+				ok: true,
+				code: input.replace('a: 1', 'a: 2'),
+				changed: true,
+			});
+		}
+		for (const [target, wrapper] of [
+			['{ a: 1 }', 'defineConfig'],
+			['defineConfig({ a: 1 })', null],
+			['defineConfig({ a: 1 })', ''],
+			['defineVitestConfig({ a: 1 })', 'defineConfig'],
+			['outer(defineConfig({ a: 1 }))', 'defineConfig'],
+		]) {
+			const result = applyEdits(`export default ${target};`, [edit], { language, wrapper });
+			assert.equal(result.ok, false, target);
+			if (!target.startsWith('outer')) fails(result, 'PRECONDITION_FAILED');
+		}
+	}
+});
+
+test('reports a wrapper mismatch for creation, appends and later operations without code', () => {
+	const input = 'export default defineVitestConfig({ list: [] });';
+	const set = { op: 'set', path: ['server', 'port'], expect: { missing: true }, value: 1 };
+	const append = { op: 'append', path: ['list'], expect: { value: [] }, value: 1 };
+	const add = { op: 'addImport', from: 'pkg', local: 'plugin', expect: { missing: true } };
+	for (const edit of [set, append]) {
+		fails(applyEdits(input, [edit], { wrapper: 'defineConfig' }), 'PRECONDITION_FAILED');
+		fails(applyEdits(input, [add, edit], { wrapper: 'defineConfig' }), 'PRECONDITION_FAILED', 1);
+	}
+	assert.equal(applyEdits('const x = 1;', [add]).ok, true);
 });

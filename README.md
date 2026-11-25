@@ -88,7 +88,7 @@ const result = applyEdits(source, [
   { op: 'addImport', from: '@vitejs/plugin-react', local: 'react', expect: { missing: true } },
   { op: 'append', path: ['plugins'], expect: { value: [] }, expression: 'react()' },
   { op: 'set', path: ['server', 'port'], expect: { value: 3000 }, value: 3001 },
-], { language: 'ts' });
+], { language: 'ts', wrapper: 'defineConfig' });
 
 if (result.ok) {
   console.info(result.code);
@@ -133,6 +133,13 @@ position preserves both, the edit fails.
 
 ## Preconditions and verified success
 
+`applyEdits()` requires `wrapper` in its options. Pass the function name expected
+around the config, such as `'defineConfig'`, or `null` when the object is exported
+directly. Every `set` and `append` checks it; a mismatch is `PRECONDITION_FAILED`.
+`addImport` does not edit the config object and does not check it. The caller is
+responsible for knowing what that function accepts and returns. Kagaru compares
+the local name only: it does not check which module the function comes from.
+
 For `set` and `append`, `expect` contains exactly one of:
 
 - `{ value: ... }`: the current value must be readable as JSON and equal to this
@@ -162,7 +169,8 @@ no-op whose expectation still holds can succeed; this is not an exactly-once API
 
 `ok: true` guarantees both of the following for every operation:
 
-1. Its declared precondition matched the current target.
+1. Its declared precondition matched the current target, including the wrapper
+   for `set` and `append`.
 2. The resulting module passed independent checks of the requested JSON value or
    expression AST, the surrounding AST, and preservation of existing source text
    outside the permitted replacement or insertion. Appends preserve existing
@@ -176,7 +184,9 @@ satisfy JSON value expectations. Use expression expectations for supported
 non-JSON expressions instead.
 
 Success does **not** establish that the setting name is valid, an expression
-returns the desired value, imports exist, or execution has no other effects.
+or config function returns the desired value, names in expressions are bound,
+imports exist, or execution has no other effects. A new import can also change
+what an existing global reference, such as `process`, resolves to.
 Those require human review, type checking or the application's configuration
 schema. Preconditions cover only the declared targets, not the entire file or
 external state. Callers own concurrent file access and must avoid saving a result
@@ -184,7 +194,7 @@ over a file changed after it was supplied to Kagaru.
 
 ## Results and errors
 
-`applyEdits(source, operations, options?)` is synchronous. It validates all
+`applyEdits(source, operations, options)` is synchronous. It validates all
 instruction shapes, parses the source, then checks, applies and verifies operations
 in order. Any failure returns no edited code.
 
@@ -212,10 +222,10 @@ no code, including when earlier operations succeeded.
 | `INVALID_SOURCE` | Source cannot be parsed in the selected language | `null` |
 | `INVALID_EXPRESSION` | An inserted or expected expression cannot be parsed as one expression | Zero-based operation index |
 | `EDIT_FAILED` | Unsupported target, import collision or invalid resulting module | Zero-based operation index |
-| `PRECONDITION_FAILED` | The current target does not satisfy its declared expectation | Zero-based operation index |
+| `PRECONDITION_FAILED` | The current target does not satisfy its declared expectation or wrapper | Zero-based operation index |
 | `VERIFICATION_FAILED` | The generated edit did not satisfy the independent output checks | Zero-based operation index |
 
-The package exports `EditOptions`, `EditOperation`, `ApplyEditsResult`, `JsonValue`,
+The package exports `ApplyEditsOptions`, `EditOptions`, `EditOperation`, `ApplyEditsResult`, `JsonValue`,
 `Expression`, `ConfigEditor`, `ValueExpectation` and `ImportExpectation` types. The JSON Schema uses draft 2020-12 and
 describes the operation array. Syntax checks for expressions and local import
 identifiers are performed by Kagaru, beyond the schema's shape validation.
@@ -224,12 +234,15 @@ Runtime input validation has no additional dependency.
 ## Language and editing scope
 
 All entry points accept `{ language: 'js' | 'ts' }`; the default is `'js'`.
+`applyEdits()` also requires `wrapper`.
 TypeScript mode supports type annotations, type-only imports, `as const`,
 `satisfies` and calls with type arguments. It checks syntax, without type checking
 or executing source or expression code.
 
-The editable default export must be an object literal, or a call whose first
-argument is an object literal, such as `defineConfig<Config>({ ... })`. Parentheses,
+The editable default export must be an object literal, or a named function call
+whose only argument is an object literal, such as `defineConfig<Config>({ ... })`.
+Multiple default exports are rejected. Kagaru edits the argument without knowing
+what the function returns. Parentheses,
 `as` and `satisfies` wrappers around these targets are supported. Nested objects
 and arrays can also have these wrappers.
 

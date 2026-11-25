@@ -1,5 +1,12 @@
 import { applyEdits, editConfig, expression } from 'kagaru';
-import type { ApplyEditsResult, EditOperation, EditOptions, Expression, JsonValue } from 'kagaru';
+import type {
+	ApplyEditsOptions,
+	ApplyEditsResult,
+	EditOperation,
+	EditOptions,
+	Expression,
+	JsonValue,
+} from 'kagaru';
 
 const options: EditOptions = { language: 'ts' };
 const operations = [
@@ -20,7 +27,10 @@ const operations = [
 		imported: 'defineConfig',
 	},
 ] satisfies EditOperation[];
-const result: ApplyEditsResult = applyEdits('export default {};', operations, options);
+const result: ApplyEditsResult = applyEdits('export default {};', operations, {
+	...options,
+	wrapper: null,
+});
 if (result.ok) {
 	const code: string = result.code;
 	const changed: boolean = result.changed;
@@ -38,9 +48,13 @@ if (result.ok) {
 const value: Expression = expression('plugin() as Plugin', options);
 editConfig('export default {} as const;', options).set(['plugin'], value);
 editConfig('export default {};').append(['list'], expression('plugin()'));
-applyEdits('export default {};', [
-	{ op: 'set', expect: { missing: true }, path: ['port'], value: 1 },
-] as const);
+applyEdits(
+	'export default {};',
+	[{ op: 'set', expect: { missing: true }, path: ['port'], value: 1 }] as const,
+	{ wrapper: null },
+);
+// @ts-expect-error The wrapper declaration is required.
+applyEdits('export default {};', []);
 
 type Assert<T extends true> = T;
 type Reject<T> = T extends EditOperation ? false : true;
@@ -80,6 +94,8 @@ type InvalidOperations = [
 			imported: null;
 		}>
 	>,
+	Assert<{} extends ApplyEditsOptions ? false : true>,
+	Assert<{ wrapper: 1 } extends ApplyEditsOptions ? false : true>,
 	Assert<{ language: 'tsx' } extends EditOptions ? false : true>,
 	Assert<Expression extends JsonValue ? false : true>,
 ];

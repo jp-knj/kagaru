@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import Ajv2020 from 'ajv/dist/2020.js';
-import { applyEdits } from 'kagaru';
+import { applyEdits as applyEditsWithOptions } from 'kagaru';
+
+const applyEdits = (source, operations, options) =>
+	applyEditsWithOptions(source, operations, { wrapper: null, ...options });
 
 const schema = JSON.parse(
 	readFileSync(new URL(import.meta.resolve('kagaru/operations.schema.json')), 'utf8'),

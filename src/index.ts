@@ -24,6 +24,11 @@ export interface EditOptions {
 	language?: 'js' | 'ts';
 }
 
+export interface ApplyEditsOptions extends EditOptions {
+	/** Expected config function name, or null for a directly exported object. */
+	wrapper: string | null;
+}
+
 export type ValueExpectation =
 	| { missing: true; value?: never; expression?: never }
 	| { value: JsonValue; missing?: never; expression?: never }
@@ -269,10 +274,14 @@ function createEditor(input: string, options: EditOptions) {
 		if (!Array.isArray(path) || !path.length || path.some((key) => typeof key !== 'string')) {
 			throw new TypeError('A path must be a non-empty array of property names.');
 		}
-		let object = unwrap(
-			ast.body.find((node) => isNode(node, 'ExportDefaultDeclaration'))?.declaration,
-		);
-		if (isNode(object, 'CallExpression')) object = unwrap(object.arguments[0]);
+		const exports = ast.body.filter((node) => isNode(node, 'ExportDefaultDeclaration'));
+		if (exports.length > 1) throw new Error('Multiple default exports are not supported.');
+		let object = unwrap(exports[0]?.declaration);
+		if (isNode(object, 'CallExpression')) {
+			if (object.optional || object.callee.type !== 'Identifier' || object.arguments.length !== 1)
+				throw new Error('A config call must be a named function with exactly one argument.');
+			object = unwrap(object.arguments[0]);
+		}
 		const rendered = serialize(value);
 		for (let i = 0; i < path.length; i++) {
 			if (!isNode(object, 'ObjectExpression'))
@@ -502,7 +511,7 @@ function validateOperation(operation: unknown): asserts operation is EditOperati
 export function applyEdits(
 	source: string,
 	operations: readonly EditOperation[],
-	options: EditOptions = {},
+	options: ApplyEditsOptions,
 ): ApplyEditsResult {
 	const failure = (
 		code: Extract<ApplyEditsResult, { ok: false }>['error']['code'],
@@ -516,11 +525,18 @@ export function applyEdits(
 			message: error instanceof Error ? error.message : String(error),
 		},
 	});
+	let wrapper: string | null;
+	let editOptions: EditOptions;
 	try {
 		if (typeof source !== 'string' || !isList(operations)) {
 			throw new TypeError('Expected source text and an array of operations.');
 		}
-		validateOptions(options);
+		if (!isRecord(options)) throw new TypeError('Expected options with a wrapper declaration.');
+		({ wrapper, ...editOptions } = options);
+		if (wrapper !== null && typeof wrapper !== 'string') {
+			throw new TypeError('Declare wrapper as a function name, or null for an object export.');
+		}
+		validateOptions(editOptions);
 	} catch (error) {
 		return failure('INVALID_INPUT', null, error);
 	}
@@ -533,7 +549,7 @@ export function applyEdits(
 	}
 	let state;
 	try {
-		state = createEditor(source, options);
+		state = createEditor(source, editOptions);
 	} catch (error) {
 		return failure('INVALID_SOURCE', null, error);
 	}
@@ -546,23 +562,23 @@ export function applyEdits(
 		let expectedExpression: Node | undefined;
 		try {
 			if ('expression' in operation && operation.expression !== undefined) {
-				const parsed = parseExpression(operation.expression, options);
+				const parsed = parseExpression(operation.expression, editOptions);
 				value = parsed.value;
 				valueExpression = parsed.node;
 			}
 			if ('expression' in operation.expect && operation.expect.expression !== undefined) {
-				expectedExpression = parseExpression(operation.expect.expression, options).node;
+				expectedExpression = parseExpression(operation.expect.expression, editOptions).node;
 			}
 		} catch (error) {
 			return failure('INVALID_EXPRESSION', i, error);
 		}
 		const before = state.snapshot();
 		try {
-			if (!checkPrecondition(before.ast, operation, expectedExpression)) {
+			if (!checkPrecondition(before.ast, operation, wrapper, expectedExpression)) {
 				return failure(
 					'PRECONDITION_FAILED',
 					i,
-					new Error('The declared precondition does not match the current target.'),
+					new Error('The declared wrapper or precondition does not match the current target.'),
 				);
 			}
 		} catch (error) {
