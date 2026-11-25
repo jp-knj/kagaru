@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyEdits, editConfig, expression } from 'kagaru';
+import { applyEdits as applyEditsWithOptions, editConfig, expression } from 'kagaru';
+
+const applyEdits = (source, operations, options) =>
+	applyEditsWithOptions(source, operations, { wrapper: null, ...options });
 
 const options = { language: 'ts' };
 
@@ -29,11 +32,11 @@ test('preserves type annotations, type imports, comments and CRLF outside edits'
 	);
 });
 
-test('edits asserted objects and first call arguments through nested wrappers', () => {
+test('edits asserted objects and call arguments through nested wrappers', () => {
 	for (const target of [
 		'({ value: 1 } as const) satisfies Config',
 		'(({ value: 1 } satisfies Config) as Config)',
-		'(defineConfig<Config>(({ value: 1 } as const), other) as Config)',
+		'(defineConfig<Config>(({ value: 1 } as const)) as Config)',
 	]) {
 		const source = `export default ${target};`;
 		assert.equal(

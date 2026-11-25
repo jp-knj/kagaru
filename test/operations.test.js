@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { applyEdits } from 'kagaru';
+import { applyEdits as applyEditsWithOptions } from 'kagaru';
+
+const applyEdits = (source, operations, options) =>
+	applyEditsWithOptions(source, operations, { wrapper: null, ...options });
 
 const source = 'export default { server: { port: 3000 }, plugins: [] };';
 
@@ -98,11 +101,16 @@ test('rejects invalid source separately from invalid input', () => {
 		null,
 		'ts',
 		[],
-		{ language: 'tsx' },
-		{ language: null },
-		{ extra: true },
+		undefined,
+		{},
+		{ language: 'ts' },
+		{ wrapper: undefined },
+		{ wrapper: 1 },
+		{ wrapper: null, language: 'tsx' },
+		{ wrapper: null, language: null },
+		{ wrapper: null, extra: true },
 	]) {
-		assertFailure(applyEdits(source, [], options), 'INVALID_INPUT', null);
+		assertFailure(applyEditsWithOptions(source, [], options), 'INVALID_INPUT', null);
 	}
 });
 

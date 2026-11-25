@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { applyEdits, editConfig } from 'kagaru';
+import { applyEdits as applyEditsWithOptions, editConfig } from 'kagaru';
+
+const applyEdits = (source, operations, options) =>
+	applyEditsWithOptions(source, operations, { wrapper: null, ...options });
 
 const operation = {
 	op: 'addImport',

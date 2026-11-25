@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Parser } from 'acorn';
 import { tsPlugin } from '@sveltejs/acorn-typescript';
-import { applyEdits } from 'kagaru';
+import { applyEdits as applyEditsWithOptions } from 'kagaru';
 import { verifyEdit } from '../dist/verification.js';
+
+const applyEdits = (source, operations, options) =>
+	applyEditsWithOptions(source, operations, { wrapper: null, ...options });
 
 const parser = Parser.extend(tsPlugin({ jsx: false }));
 function snapshot(source) {

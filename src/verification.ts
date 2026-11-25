@@ -47,16 +47,27 @@ function properties(node: ObjectExpression): Map<string, Property> {
 function target(
 	ast: Module,
 	path: readonly string[],
-): { object: ObjectExpression; prop: Property | undefined; index: number } {
-	let object = unwrap(
-		ast.body.find((node) => isNode(node, 'ExportDefaultDeclaration'))?.declaration,
-	);
-	if (isNode(object, 'CallExpression')) object = unwrap(object.arguments[0]);
+): {
+	object: ObjectExpression;
+	prop: Property | undefined;
+	index: number;
+	wrapper: string | null;
+} {
+	const exports = ast.body.filter((node) => isNode(node, 'ExportDefaultDeclaration'));
+	if (exports.length > 1) throw new Error('Multiple default exports are not supported.');
+	let object = unwrap(exports[0]?.declaration);
+	let wrapper: string | null = null;
+	if (isNode(object, 'CallExpression')) {
+		if (object.optional || object.callee.type !== 'Identifier' || object.arguments.length !== 1)
+			throw new Error('A config call must be a named function with exactly one argument.');
+		wrapper = object.callee.name;
+		object = unwrap(object.arguments[0]);
+	}
 	for (let index = 0; ; index++) {
 		if (!isNode(object, 'ObjectExpression'))
 			throw new Error('Expected an object literal along the edited path.');
 		const prop = properties(object).get(path[index]);
-		if (!prop || index === path.length - 1) return { object, prop, index };
+		if (!prop || index === path.length - 1) return { object, prop, index, wrapper };
 		object = unwrap(prop.value);
 	}
 }
@@ -202,6 +213,7 @@ function declares(node: unknown, name: string, top = true): boolean {
 export function checkPrecondition(
 	ast: Module,
 	operation: EditOperation,
+	wrapper: string | null,
 	expectedExpression?: Node,
 ): boolean {
 	if (operation.op === 'addImport') {
@@ -214,7 +226,8 @@ export function checkPrecondition(
 			)
 		);
 	}
-	const { prop } = target(ast, operation.path);
+	const { prop, wrapper: actualWrapper } = target(ast, operation.path);
+	if (actualWrapper !== wrapper) return false;
 	return operation.expect.missing
 		? !prop
 		: matches(prop?.value, operation.expect, expectedExpression);

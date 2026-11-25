@@ -15,7 +15,7 @@ const operations = JSON.parse(`[
   { "op": "set", "path": ["server", "port"], "expect": { "value": 3000 }, "value": 3001 }
 ]`);
 
-const result = applyEdits(source, operations, { language: 'ts' });
+const result = applyEdits(source, operations, { language: 'ts', wrapper: 'defineConfig' });
 if (result.ok) {
 	console.info(result.code);
 } else {
